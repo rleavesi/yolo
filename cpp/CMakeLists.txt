@@ -31,8 +31,7 @@ include_directories(
     /opt/intel/openvino_2021/deployment_tools/inference_engine/include/
     /opt/intel/openvino_2021/deployment_tools/ngraph/include/
 )
-# 设置RPATH，使编译好的libji.so在运行时能够找到openvino_2021的依赖库
-# 设置RPATH，使编译好的libji.so在运行时能够找到依赖库
+
 set(CMAKE_SKIP_BUILD_RPATH FALSE)
 set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
 if (DEFINED ADDITIONAL_RPATH)

@@ -49,6 +49,8 @@
 
 ## 关于数据集的准备
 
+> Armor 数据集放在 ./python/datasets/armor 文件夹下的images 和 labels文件夹里，Buff同
+
 - BUFF
 
   没什么想法
@@ -63,8 +65,6 @@
     ```shell
     python av2image.py
     ```
-
-    
 
 2. Tools 文件夹里有一个上交开源的自动标数据集的`LabelRoboMaster`，进去编译完会有一个可执行文件，可视化全自动标注
 
@@ -251,9 +251,12 @@ bool Process(const cv::Mat& src,std::vector<Object> &objects);
 2.  部署需要改的参（Yolo类里的）
 
 ```C++
-std::string _input_model; 	// 训练好的模型位置 
-size_t _n_class;			// 分的类num，装甲板是36
-size_t _imgsz;				// 输入网络图像的大小，这里是512x512
+std::string _input_model; 			// 训练好的模型位置 
+size_t _n_class;					// 分的类num，装甲板是36
+size_t _imgsz;						// 输入网络图像的大小，这里是512x512
+double _cof_threshold;              // 置信度阈值,计算方法是框置信度乘以物品种类置信度，小于该值会被过滤，这里设0.4
+double _nms_area_threshold;         // nms最小重叠面积阈值(框和框之间的重叠面积)，这里设0.1
+bool _use_gpu;						// 是否使用CPU核显加速
 ```
 
 3. 输出图像

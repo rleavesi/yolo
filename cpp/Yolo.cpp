@@ -5,8 +5,10 @@ static omp_lock_t s_lock;
 
 Yolo::Yolo():   _n_class(36),
                 _imgsz(512),
-                _input_model("../last.xml")
-                
+                _input_model("../last.xml"),
+                _cof_threshold(0.4),
+                _nms_area_threshold(0.1),
+                _use_gpu(true)
                 { Init(); }
 
 Yolo::~Yolo() {}
@@ -25,7 +27,8 @@ void Yolo::Init() {
     _outputinfo = InferenceEngine::OutputsDataMap(cnnNetwork.getOutputsInfo());
     for (auto &output : _outputinfo) {
         output.second->setPrecision(InferenceEngine::Precision::FP32); }
-    _network =  ie.LoadNetwork(cnnNetwork, "GPU");
+    if(_use_gpu) _network =  ie.LoadNetwork(cnnNetwork, "GPU");
+    else _network =  ie.LoadNetwork(cnnNetwork, "CPU");
     omp_init_lock(&lock_use); // 初始化互斥锁
     omp_init_lock(&s_lock); // 初始化互斥锁
 }
@@ -34,21 +37,24 @@ void Yolo::Init() {
 bool Yolo::Process(const cv::Mat& dst,std::vector<Object> &objects) {
     if(dst.empty()) return false;
 
+    // 计算图像缩小率方便画图复原
     _ratio_rows = (float)(_imgsz) / (float)(dst.rows);
     _ratio_cols = (float)(_imgsz) / (float)(dst.cols);
 
+    // 图像预处理
     cv::Mat src;
     cv::resize(dst,src,cv::Size(_imgsz,_imgsz));
     cv::cvtColor(src,src,cv::COLOR_BGR2RGB);
 
+    // 将图像数据转化为openvino加速需要的tensor(blob)
     size_t img_size = _imgsz * _imgsz;
     InferenceEngine::InferRequest::Ptr infer_request = _network.CreateInferRequestPtr();
     InferenceEngine::Blob::Ptr frameBlob = infer_request->GetBlob(_input_name);
     InferenceEngine::LockedMemory<void> blobMapped = InferenceEngine::as<InferenceEngine::MemoryBlob>(frameBlob)->wmap();
     float* blob_data = blobMapped.as<float*>();
     
-    //nchw
-    omp_set_num_threads(4);
+    // nchw 
+    omp_set_num_threads(4); // 线程加速1
     #pragma omp parallel for
     for(size_t row = 0; row < _imgsz; row++){
         for(size_t col = 0; col < _imgsz; col++){
@@ -57,15 +63,16 @@ bool Yolo::Process(const cv::Mat& dst,std::vector<Object> &objects) {
             }
         }
     }
+
+    // 推理
     infer_request->Infer();
 
+    // 推理结束后需要获取的数据
     std::vector<cv::Rect> origin_rect;
     std::vector<float> origin_rect_cof;
     std::vector<int> origin_res_id;
 
-
-    int s[3] = {64,32,16};
-    //大规模计算之前先收集指针
+    // 获取数据时大规模计算之前先收集指针
     std::vector<InferenceEngine::Blob::Ptr> blobs;
     for (auto &output : _outputinfo) {
         if(output.first == "output")    break;
@@ -73,37 +80,42 @@ bool Yolo::Process(const cv::Mat& dst,std::vector<Object> &objects) {
         blobs.push_back(blob);
     }
 
-    omp_set_num_threads(3);
+    // 这里的三个数对应网络三个输出的三个锚框的大小(Tips:使用netron可视化网络，查看output)
+    int s[3] = {64,32,16};
+
+    omp_set_num_threads(3); // 线程加速2
     #pragma omp parallel for
     for(int i = 0; i < blobs.size(); i++){
         float th = 0.5;
-        //小目标严格要求
+        // 小目标置信度阈值
         if(i == 0)
             th = 0.55;
-        //大目标放宽要求
+        // 大目标置信度阈值
         else if(i == 1)
             th = 0.45;
         else if(i == 2)
             th = 0.40;
-        //TODO:根据网格大小使用不同阈值
+
         std::vector<cv::Rect> origin_rect_temp;
         std::vector<float> origin_rect_cof_temp;
         std::vector<int> origin_res_id_temp;
+
+        // 获取所有信息
         Parse(blobs[i],s[i],th,origin_rect_temp,origin_rect_cof_temp,origin_res_id_temp);
-        //加入总的结果时加锁
-        omp_set_lock(&lock_use); //获得互斥器
+        
+        // 加锁
+        omp_set_lock(&lock_use); // 互斥器
         origin_rect.insert(origin_rect.end(),origin_rect_temp.begin(),origin_rect_temp.end());
         origin_rect_cof.insert(origin_rect_cof.end(),origin_rect_cof_temp.begin(),origin_rect_cof_temp.end());
         origin_res_id.insert(origin_res_id.end(),origin_res_id_temp.begin(),origin_res_id_temp.end());
-        omp_unset_lock(&lock_use); //释放互斥器
+        omp_unset_lock(&lock_use); // 释放
     }
 
-    //后处理获得最终检测结果
+    // NMS后处理
     std::vector<int> final_id;
-    //TODO:此处的阈值需要调整
-    //TODO:第一参数0.5为当前最佳
-    cv::dnn::NMSBoxes(origin_rect,origin_rect_cof,0.1,0.1,final_id);
-    //根据final_id获取最终结果
+    cv::dnn::NMSBoxes(origin_rect,origin_rect_cof,_cof_threshold,_nms_area_threshold,final_id);
+
+    // 获取最终结果
     for(int i = 0; i < final_id.size(); i++) {
         objects.push_back(Object{
             .prob = origin_rect_cof[final_id[i]],
@@ -120,6 +132,8 @@ double Yolo::Sigmoid(double x) {
 
 std::vector<int> Yolo::GetAnchors(int net_grid) {
     std::vector<int> anchors(6);
+
+    // 这里数据对应Python训练时的model/yolo.yaml
     int a64[6] = {10,15, 13,24, 18,19};
     int a32[6] = {20,44, 29,26, 42,43};
     int a16[6] = {64,115, 139,111, 309,379}; 
@@ -146,6 +160,7 @@ void Yolo::Parse(const InferenceEngine::Blob::Ptr blob,int net_grid,float cof_th
             for(int j = 0;j < net_grid; j++) {
                 double box_prob = output_blob[n * net_grid * net_grid * item_size + i * net_grid * item_size + j * item_size+ 4];
                 box_prob = Sigmoid(box_prob);
+                
                 // 框置信度不满足则整体置信度不满足
                 if(box_prob < cof_threshold)
                     continue;

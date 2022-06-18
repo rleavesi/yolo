@@ -13,6 +13,8 @@
         "string_view": "cpp",
         "initializer_list": "cpp",
         "valarray": "cpp",
-        "chrono": "cpp"
+        "chrono": "cpp",
+        "xstring": "cpp",
+        "xutility": "cpp"
     }
 }
