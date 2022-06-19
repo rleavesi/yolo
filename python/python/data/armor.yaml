@@ -1,0 +1,46 @@
+path: datasets/armor  # dataset root dir
+train: images  # train images (relative to 'path') 90% of 847 train images
+val: images  # train images (relative to 'path') 10% of 847 train images
+# Classes
+nc: 36  # number of classes
+names: ['BG',
+        'B1',
+        'B2',
+        'B3',
+        'B4',
+        'B5',
+        'BO',
+        'Bs',
+        'Bb',
+
+        'RG',
+        'R1',
+        'R2',
+        'R3',
+        'R4',
+        'R5',
+        'RO',
+        'Rs',
+        'Rb',
+        
+        'NG',
+        'N1',
+        'N2',
+        'N3',
+        'N4',
+        'N5',
+        'NO',
+        'Ns',
+        'Nb',
+        
+        'PG',
+        'P1',
+        'P2',
+        'P3',
+        'P4',
+        'P5',
+        'PO',
+        'Ps',
+        'Pb'
+        ]
+
